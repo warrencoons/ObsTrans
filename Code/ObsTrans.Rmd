@@ -1,0 +1,568 @@
+---
+title: "Thesis Code"
+author: "Warren Coons"
+date: "2024-02-17"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Thesis Code
+
+# Setup - Packages and Working Directory
+
+```{r}
+## Function to load packages 
+install_load <- function(packages){
+  for (p in packages) {
+    if (p %in% rownames(installed.packages())) {
+      library(p, character.only=TRUE)
+    } else {
+      install.packages(p)
+      library(p, character.only = TRUE)
+    }
+  }
+}
+
+######## INSTALL PACKAGES
+package_list<-c("dplyr", "data.table", "haven", "stats")
+install_load(package_list)
+```
+
+## General Exclusions (Applied to both NHANES and BRFSS)
+
+- Those less than 20 yrs old
+- Those with missing data in any covariates
+
+## NHANES Overview
+
+Variables:
+
+Exposure: LBXBPB = Lead level (lead)
+Outcome: hyper = Hypertension (BP)
+Covariates:
+- Age: RIDAGEYR (demo) 
+- Sex: RIAGENDR (demo)
+- Race: RIDRETH1 (demo)
+- Educational Attainment: DMDEDUC2 (demo)
+- BMI: BMXBMI (BMI)
+- Smoking behavior: SMQ020 (smoke) and SMQ40 (smoke)
+- Alcohol use: ALQ130 (ALC)
+
+List of possible EMM on the RD scale found in BRFSS:
+- Stress: HSQ480 (maybe use depression screener) (stress)
+- Sleep duration: SLD010H (sleep)
+
+List of possible EMM on the RD scale NOT found in BRFSS:
+- Diets heavy in salt (Given by sodium levels on day 1): XX NOT FOUND IN BRFSS (DR1TSODI)
+- Inadequate consumption of fruits and vegetables: XX NOT FOUND IN BRFSS
+- Body mass: XX CONFOUNDER
+- Physical Activity: XX QUESTION DOESN'T HAVE AN ANALOG FOR BRFSS
+- Trouble sleeping: XX NOT FOUND IN BRFSS
+- Sleep disorders: XX NOT FOUND IN BRFSS
+
+Codebooks:
+- Lead: https://wwwn.cdc.gov/Nchs/Nhanes/2011-2012/PBCD_G.htm
+- BP: https://wwwn.cdc.gov/Nchs/Nhanes/2011-2012/BPX_G.htm
+- Demo: https://wwwn.cdc.gov/Nchs/Nhanes/2011-2012/DEMO_G.htm
+- BMI: https://wwwn.cdc.gov/Nchs/Nhanes/2011-2012/BMX_G.htm
+- Smoke: https://wwwn.cdc.gov/Nchs/Nhanes/2011-2012/SMQ_G.htm
+- ALC: https://wwwn.cdc.gov/Nchs/Nhanes/2011-2012/ALQ_G.htm
+- Stress: https://wwwn.cdc.gov/Nchs/Nhanes/2011-2012/HSQ_G.htm#HSQ480
+- Sleep: https://wwwn.cdc.gov/Nchs/Nhanes/2011-2012/SLQ_G.htm
+
+Risk Factors of Hypertension - Codebooks:
+- (Stress) https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1940093/
+- (Sleep) https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8345503/ (specifically sleeping duration, trouble sleeping, and sleep disorders)
+- (Many others) https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10181897/
+
+Study Inspiration:
+- https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9081331/#:~:text=In%20some%20studies%2C%20blood%20lead,demonstrated%20(19%2C%2020). (Several confounders and exclusion criteria come from this study)
+
+# NHANES Setup - Importing Data
+
+```{r}
+# Exposure
+lead <- read_xpt("PB12.XPT")
+
+# Outcome (to be converted to hypertension)
+BP <- read_xpt("BP12.XPT")
+
+# Confounders
+demo <- read_xpt("DEMO12.XPT")
+BMI <- read_xpt("BMI12.XPT")
+smoke <- read_xpt("SMOKE12.XPT")
+ALC <- read_xpt("ALQ12.XPT")
+
+# Possible EMM
+stress <- read_xpt("STRESS12.XPT")
+sleep <- read_xpt("SLEEP12.XPT")
+```
+
+# NHANES Setup - Merging Data
+
+```{r, echo=FALSE}
+df <- lead %>% 
+  left_join(., demo, by = "SEQN") %>%
+  left_join(., BP, by = "SEQN") %>%
+  left_join(., BMI, by = "SEQN") %>%
+  left_join(., smoke, by = "SEQN") %>%
+  left_join(., ALC, by = "SEQN") %>%
+  left_join(., stress, by = "SEQN") %>% 
+  left_join(., sleep, by = "SEQN")
+```
+
+# NHANES Setup - Defining nhanes and Defining the Outcome
+
+```{r}
+nhanes <- df %>%  
+  transform(hyper = ifelse(((BPXSY1 >= 130) | (BPXDI1 >= 80)), 1, 0)) #Find a source for the definition of hypertension (n = 8956)
+
+nrow(nhanes)
+```
+
+Note: Definition of hypertension (according to AHA): https://www.heart.org/en/health-topics/high-blood-pressure/the-facts-about-high-blood-pressure
+
+# Data Correction so Never Smokers Don't Automatically Get Dropped
+
+```{r}
+nhanes$SMQ040[nhanes$SMQ020 == 2] <- 3
+```
+
+# NHANES Setup - Applying Exclusion Criteria and Filtering out NA Values
+
+```{r}
+vars <- c("SEQN", "LBXBPB", "RIDAGEYR", "RIAGENDR", "RIDRETH1", "DMDEDUC2", "BMXBMI", "SMQ020", "SMQ040", "ALQ130", "BPXSY1", "BPXDI1", "HSQ480", "SLD010H", "hyper")
+
+nhanes <- nhanes %>% 
+  subset(select = all_of(vars)) %>%
+  filter(complete.cases(.)) %>%
+  filter(RIDAGEYR >= 20)
+
+nhanes
+```
+
+Note: Sleep duration is capped out at 12 hours a day (anything above 12 was recorded as 12)
+
+# NHANES Setup - Filtering out Other Missing Values
+
+```{r}
+# Filtering out Lead Limit Below Detection (Limit is 0.25)
+nhanes <- nhanes %>% 
+  filter(LBXBPB >= 0.25) # (6)
+  
+# Filtering out Refused/Don't Know Education
+nhanes <- nhanes %>% 
+  filter(DMDEDUC2 != 7, DMDEDUC2 != 9) # (0)
+
+# Filtering out Refused/Don't Know Smoking History
+nhanes <- nhanes %>% 
+  filter(SMQ020 != 7, SMQ020 != 9) %>%  
+  filter(SMQ040 != 7, SMQ040 != 9) # (1)
+  
+# Filtering out Refused/Don't Know Alcohol History
+nhanes <- nhanes %>% 
+  filter(ALQ130 != 777, ALQ130 != 999) # (4)
+
+# Filtering out Refused/Don't Know Stress Levels
+nhanes <- nhanes %>% 
+  filter(HSQ480 != 77, HSQ480 != 99) # (1)
+
+# Filtering out Refused/Don't Know Sleep Duration
+nhanes <- nhanes %>% 
+  filter(SLD010H != 77, SLD010H != 99) # (2)
+
+nhanes # (n = 1326)
+```
+
+## NHANES Smoking Data Transformations
+
+```{r}
+nhanes <- nhanes %>% 
+  mutate(DMDEDUC2 = DMDEDUC2 %>% 
+    replace(. == 2, 1) %>%
+    replace(. == 4, 5)
+  )
+
+nhanes <- nhanes %>% 
+  mutate(
+    SMOKE = case_when(
+      (SMQ020 == 1) & ((SMQ040 == 1) | (SMQ040 == 2)) ~ 1,
+      (SMQ020 == 1) & (SMQ040 == 3) ~ 2,
+      (SMQ020 == 2) ~ 3
+    )
+  )
+```
+
+# Table 1 Part 1 (NHANES)
+
+```{r}
+table1_1 <- data.table('Group' = c(), 'Variable' = c(), 'Nperc' = c())
+
+add_categorical_row <- function(variable, label, value) {
+  table1_1 <- table1_1 %>% rbind(data.table('Group' = variable, 
+                                        'Variable' = label,
+                                        'Nperc' = sum(nhanes[[variable]] %in% value)))
+  return(table1_1)
+}
+
+table1_1 <- add_categorical_row("RIAGENDR", "Male", 1)
+table1_1 <- add_categorical_row("RIAGENDR", "Female", 2)
+table1_1 <- add_categorical_row("RIDRETH1", "Mexican American", 1)
+table1_1 <- add_categorical_row("RIDRETH1", "Other Hispanic", 2)
+table1_1 <- add_categorical_row("RIDRETH1", "Non-Hispanic White", 3)
+table1_1 <- add_categorical_row("RIDRETH1", "Non-Hispanic Black", 4)
+table1_1 <- add_categorical_row("RIDRETH1", "Other Race - Including Multi-Racial", 5)
+table1_1 <- add_categorical_row("DMDEDUC2", "< High School", 1)
+table1_1 <- add_categorical_row("DMDEDUC2", "High School", 3)
+table1_1 <- add_categorical_row("DMDEDUC2", "> High School", 5)
+table1_1 <- add_categorical_row("SMOKE", "Current Smoker", 1)
+table1_1 <- add_categorical_row("SMOKE", "Former Smoker", 2)
+table1_1 <- add_categorical_row("SMOKE", "Never Smoker", 3)
+table1_1 <- add_categorical_row("hyper", "Doesn't Have Hypertension", 0)
+table1_1 <- add_categorical_row("hyper", "Has Hypertension", 1)
+
+# sum(data[["hyper"]] == 1)
+
+# data$hyper
+
+table1_1 <- table1_1 %>% group_by(Group) %>% 
+  mutate(Nperc = paste0(Nperc, " (", round(Nperc/sum(Nperc), 3)*100, ")")) %>% 
+  rename('N (%)' = Nperc) %>% 
+  ungroup %>% 
+  subset(select = -Group)
+
+## WHICH ROWS TO DELETE???
+
+table1_1
+```
+
+# Table 1 Part 2 (NHANES)
+
+```{r}
+table1_2 <- data.table('Variable' = c(), 'Mean (std. dev.)' = c())
+
+add_continuous_row <- function(variable, label) {
+  table1_2 <- table1_2 %>% rbind(data.table('Variable' = label, 
+                                        'Mean (std. dev.)' = paste0(round(mean(nhanes[[variable]]), 2), ' (', round(sd(nhanes[[variable]]), 2), ')')))
+  return(table1_2)
+}
+
+table1_2 <- add_continuous_row("LBXBPB", "Lead Level (\u03BCg/dL)")
+table1_2 <- add_continuous_row("RIDAGEYR", "Age (yrs)")
+table1_2 <- add_continuous_row("BMXBMI", "BMI (kg/m\u00B2)")
+table1_2 <- add_continuous_row("ALQ130", "Alcoholic drinks per day")
+table1_2 <- add_continuous_row("BPXSY1", "Systolic BP (mmHg)")
+table1_2 <- add_continuous_row("BPXDI1", "Diastolic BP (mmHg)")
+table1_2 <- add_continuous_row("HSQ480", "Days Stressed Per Month")
+table1_2 <- add_continuous_row("SLD010H", "Sleep Duration (hrs)")
+table1_2
+```
+
+## BRFSS Overview
+
+Codebooks:
+- BFRSS: https://www.cdc.gov/brfss/annual_data/annual_2022.html
+
+List of possible EMM on the RD scale also found in NHANES:
+- Stress: MENTHLTH
+- Sleep duration (hours of sleep): SLEPTIM1
+
+# BRFSS Setup - Importing Data
+
+```{r}
+brfss_original <- read_xpt("BRFSS.XPT")
+# brfss
+
+brfss_original
+```
+
+# BRFSS Setup - Defining BRFSS
+
+```{r}
+brfss_var <- c("_AGE80", "_BMI5", "ALCDAY4", "SEXVAR", "EDUCA", "_SMOKER3", "MENTHLTH", "SLEPTIM1")
+
+brfss <- brfss_original %>%   
+  subset(select = all_of(brfss_var)) %>% 
+  rename(AGE80 = "_AGE80") %>% 
+  rename(BMI = "_BMI5") %>% 
+  rename(SMOKER = "_SMOKER3") 
+
+# brfss
+```
+
+# BRFSS Setup - Applying Exclusion Criteria and Filtering out NA Values
+
+```{r}
+brfss <- brfss %>% 
+  filter(complete.cases("AGE80", "MENTHLTH", "SLEPTIM1")) %>% # (0)
+  filter(AGE80 >= 20) # (6924)
+
+brfss
+```
+
+Note: Age had been imputed.
+
+# BRFSS Setup - Filtering out Other Missing Values
+
+```{r}
+# Filtering out Unknown Mental Health 
+brfss <- brfss %>% 
+  filter(MENTHLTH != 77, MENTHLTH != 88, MENTHLTH != 99) # (271727)
+
+# Filtering out Unknown Sleep Duration
+brfss <- brfss %>% 
+  filter(SLEPTIM1 != 77, SLEPTIM1 != 99) # (1680)
+
+# brfss # (n = 164801)
+```
+
+# Table 1 Part 3 (BRFSS)
+
+```{r}
+table1_3 <- data.table('Variable' = c(), 'Value' = c())
+
+add_continuous_row_3 <- function(variable, label) {
+  table1_3 <- table1_3 %>% rbind(data.table('Variable' = label, 
+                                        'Value' = paste0(round(mean(brfss[[variable]]), 2), ' (', round(sd(brfss[[variable]]), 2), ')')))
+  return(table1_3)
+}
+
+add_categorical_row_brfss <- function(variable, label, value) {
+  table1_3 <- table1_3 %>% rbind(data.table('Variable' = label,
+                                        'Value' = sum(brfss[[variable]] %in% value)/nrow(brfss)))
+  return(table1_3)
+}
+
+table1_3 <- add_continuous_row_3("AGE80", "Age")
+table1_3 <- add_continuous_row_3("MENTHLTH", "Days Stressed per Month")
+table1_3 <- add_continuous_row_3("SLEPTIM1", "Sleep Duration (hrs)")
+table1_3
+```
+
+# Adding More Variables to Table1_3
+
+```{r}
+# BMI
+
+old_brfss <- brfss
+brfss <- brfss %>% 
+  mutate(BMI = BMI/100) %>% 
+  filter(!is.na(BMI))
+table1_3 <- add_continuous_row_3("BMI", "BMI")
+brfss <- old_brfss
+
+# Alcoholic Drinks per Day
+
+old_brfss <- brfss
+brfss <- brfss %>% 
+  filter(ALCDAY4 != 777, ALCDAY4 != 888, ALCDAY4 != 999, !is.na(ALCDAY4))
+table1_3 <- add_continuous_row_3("ALCDAY4", "Alcoholic Drinks per Day")
+brfss <- old_brfss
+
+# Sex
+
+old_brfss <- brfss
+brfss <- brfss %>% filter(!is.na(SEXVAR))
+table1_3 <- add_categorical_row_brfss("SEXVAR", "Male", 1)
+table1_3 <- add_categorical_row_brfss("SEXVAR", "Female", 2)
+brfss <- old_brfss
+
+# Education
+
+old_brfss <- brfss
+brfss <- brfss %>% 
+  filter(EDUCA != 9, !is.na(EDUCA))
+table1_3 <- add_categorical_row_brfss("EDUCA", "< High School", 1:3)
+table1_3 <- add_categorical_row_brfss("EDUCA", "High School", 4)
+table1_3 <- add_categorical_row_brfss("EDUCA", "> High School", 5:6)
+brfss <- old_brfss
+
+# Smoking Status
+
+old_brfss <- brfss
+brfss <- brfss %>% 
+  filter(SMOKER != 9, !is.na(SMOKER))
+table1_3 <- add_categorical_row_brfss("SMOKER", "Current Smoker", 1:2)
+table1_3 <- add_categorical_row_brfss("SMOKER", "Former Smoker", 3)
+table1_3 <- add_categorical_row_brfss("SMOKER", "Never Smoker", 4)
+brfss <- old_brfss
+
+table1_3
+```
+
+## NHANES Analysis
+
+# NHANES Conversion of Some Variables to Factor Type
+
+```{r}
+nhanes <- nhanes %>% 
+  mutate(RIAGENDR = as.factor(RIAGENDR)) %>% 
+  mutate(RIDRETH1 = as.factor(RIDRETH1)) %>% 
+  mutate(DMDEDUC2 = as.factor(DMDEDUC2)) %>% 
+  mutate(SMOKE = as.factor(SMOKE))
+  # select(-c(SEQN, SMQ020, SMQ040, BPXSY1, BPXDI1, ))
+```
+
+# Testing for EMM
+
+```{r}
+# stress_EMM_model <- glm(hyper ~ LBXBPB + RIDAGEYR + RIAGENDR + RIDRETH1 + DMDEDUC2 + BMXBMI + SMOKE + ALQ130 + LBXBPB*HSQ480, nhanes, family=binomial(link="logit"))
+
+stress_EMM_model <- lm(hyper ~ LBXBPB + RIDAGEYR + RIAGENDR + RIDRETH1 + DMDEDUC2 + BMXBMI + SMOKE + ALQ130 + LBXBPB*HSQ480, nhanes)
+summary(stress_EMM_model)
+
+# sleep_EMM_model <- glm(hyper ~ LBXBPB + RIDAGEYR + RIAGENDR + RIDRETH1 + DMDEDUC2 + BMXBMI + SMOKE + ALQ130 + LBXBPB*SLD010H, nhanes, family=binomial(link="logit"))
+
+sleep_EMM_model <- lm(hyper ~ LBXBPB + RIDAGEYR + RIAGENDR + RIDRETH1 + DMDEDUC2 + BMXBMI + SMOKE + ALQ130 + LBXBPB*SLD010H, nhanes)
+summary(sleep_EMM_model)
+```
+
+P for Interactions:
+- Stress = 0.4371
+- Sleep Duration = 0.4398
+
+Note that individual terms HSQ480 and SLD010H get added into the regression.
+
+# Testing EMM Distributions
+
+```{r}
+ks.test(nhanes$HSQ480, brfss$MENTHLTH)
+ks.test(nhanes$SLD010H, brfss$SLEPTIM1)
+```
+
+The Kolmogorov-Smirnov test indicates there are different distributions in days stressed per month but not sleep duration.
+
+## Transportability
+
+# Choice of vz
+
+In theory:
+
+C = All confounders listed earlier
+Differing variables = {stress}
+EMM = {sleep}
+vz = {} (empty set)
+
+However, for the purposes of illustration, we should still consider sleep as a differing variable and stress as an EMM. So we let vz = {stress, sleep}.
+
+## TRANSPORTABILITY
+
+# Prepping Study Population Dataframe
+
+```{r}
+study <- nhanes %>% 
+  rename(x = LBXBPB) %>% 
+  rename(c1 = RIDAGEYR) %>% 
+  rename(c2 = RIAGENDR) %>% 
+  rename(c3 = RIDRETH1) %>% 
+  rename(c4 = DMDEDUC2) %>% 
+  rename(c5 = BMXBMI) %>% 
+  rename(c6 = ALQ130) %>% 
+  rename(c7 = SMOKE) %>% 
+  rename(v1 = HSQ480) %>% 
+  rename(v2 = SLD010H) %>% 
+  rename(y = hyper) %>% 
+  select(-c(SEQN, SMQ020, SMQ040, BPXSY1, BPXDI1)) %>% 
+  mutate(xv1 = x*v1) %>% 
+  mutate(xv2 = x*v2)
+
+study
+```
+
+# Prepping Target Population Dataframe
+
+```{r}
+target <- brfss %>% 
+  rename(v1 = MENTHLTH) %>% 
+  rename(v2 = SLEPTIM1) %>% 
+  select(-c(AGE80))
+            
+target
+```
+
+# Simulate Data (Study and Target Pop.)
+
+```{r}
+sample_ate_logit <- c()
+transported_ate_logit <- c()
+
+N = nrow(target)
+
+for (i in 1:1000) {
+
+study_boot <- copy(study[sample(1:nrow(study),size=nrow(study),replace=TRUE),])  
+  
+## STUDY POPULATION ATE
+  
+## Q model, using logistic regression
+mod1_l <- glm(data=study_boot, formula="y ~ x + c1 + c2 + c3 + c4 + c5 + c6 + c7 + v1 + v2 + xv1 + xv2", family=binomial(link="logit"))
+# summary(mod1_l)
+  
+## increasing exposure by 1
+study1 <- copy(study_boot[,c("x","c1","c2","c3","c4","c5","c6","c7","v1","v2", "xv1", "xv2")])
+study1$x <- study1$x + 1
+study1$xv1 <- study1$x*study1$v1
+study1$xv2 <- study1$x*study1$v2
+  
+## predict new Y under this intervention 
+study1$YdoX_l <- predict(mod1_l,newdata=study1,type="response") ## predict from logistic regression instead (but predict probability)
+  
+## SATE
+sample_ate_logit <- c(sample_ate_logit, mean(study1$YdoX_l-study$y))
+
+## TRANSPORTED ATE
+
+# creating target dataframe
+
+target_temp <- target
+target <- study
+while (nrow(target) < nrow(brfss)) {
+  target <- rbind(target, target)
+}
+target <- target[1:nrow(brfss), ]
+
+target$v1 <- target_temp$v1
+target$v2 <- target_temp$v2
+
+target$xv1 <- target$x*target$v1
+target$xv2 <- target$x*target$v2
+# target
+
+# Note, I can create arbitrary values of C in the target population - you can set this to anything because the C's cancel out 
+
+## take q-model from study population and predict potential outcome
+target$Y_l <- predict(mod1_l,newdata=target,type="response") ## from alternate q-model
+  
+## now make second target population under intervention, altering X
+target1 <- copy(target[,c("x","c1","c2","c3","c4","c5","c6","c7","v1","v2","xv1","xv2")])
+target1$x <- target1$x + 1
+target1$xv1 <- target1$x*target1$v1
+target1$xv2 <- target1$x*target1$v2
+  
+## again, take q-model from study population and predict potential outcome
+target1$YdoX_l <- predict(mod1_l,newdata=target1,type="response") ## from alternate q-model (logit)
+  
+# transported_ate <- c(transported_ate,mean(target1$YdoX-target$Y))
+transported_ate_logit <- c(transported_ate_logit, mean(target1$YdoX_l-target$Y_l))
+
+}
+```
+
+# Checking out sample ATE and transported ATE (Table 2)
+
+```{r}
+mean(sample_ate_logit)
+mean(transported_ate_logit)
+
+quantile(sample_ate_logit,probs=c(0.025,0.975))
+quantile(transported_ate_logit,probs=c(0.025,0.975))
+
+# sample_ate_logit
+# transported_ate_logit
+```
+
