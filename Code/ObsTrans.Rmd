@@ -1,5 +1,5 @@
 ---
-title: "Thesis Code"
+title: "ObsTrans"
 author: "Warren Coons"
 date: "2024-02-17"
 output:
@@ -10,8 +10,6 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
-## Thesis Code
 
 # Setup - Packages and Working Directory
 
@@ -33,12 +31,14 @@ package_list<-c("dplyr", "data.table", "haven", "stats")
 install_load(package_list)
 ```
 
-## General Exclusions (Applied to both NHANES and BRFSS)
+# General Exclusions (Applied to both NHANES and BRFSS)
 
 - Those less than 20 yrs old
 - Those with missing data in any covariates
 
-## NHANES Overview
+## NHANES 
+
+# Overview
 
 Variables:
 
@@ -127,7 +127,7 @@ nrow(nhanes)
 
 Note: Definition of hypertension (according to AHA): https://www.heart.org/en/health-topics/high-blood-pressure/the-facts-about-high-blood-pressure
 
-# Data Correction so Never Smokers Don't Automatically Get Dropped
+# NHANES Setup - Data Correction so Never Smokers Don't Automatically Get Dropped
 
 ```{r}
 nhanes$SMQ040[nhanes$SMQ020 == 2] <- 3
@@ -179,7 +179,7 @@ nhanes <- nhanes %>%
 nhanes # (n = 1326)
 ```
 
-## NHANES Smoking Data Transformations
+## NHANES Setup - Smoking Data Transformations
 
 ```{r}
 nhanes <- nhanes %>% 
@@ -263,7 +263,9 @@ table1_2 <- add_continuous_row("SLD010H", "Sleep Duration (hrs)")
 table1_2
 ```
 
-## BRFSS Overview
+## BRFSS
+
+# Overview
 
 Codebooks:
 - BFRSS: https://www.cdc.gov/brfss/annual_data/annual_2022.html
@@ -450,8 +452,6 @@ vz = {} (empty set)
 
 However, for the purposes of illustration, we should still consider sleep as a differing variable and stress as an EMM. So we let vz = {stress, sleep}.
 
-## TRANSPORTABILITY
-
 # Prepping Study Population Dataframe
 
 ```{r}
@@ -485,7 +485,7 @@ target <- brfss %>%
 target
 ```
 
-# Simulate Data (Study and Target Pop.)
+# Simulating Data (Study and Target Pop.)
 
 ```{r}
 sample_ate_logit <- c()
@@ -553,7 +553,7 @@ transported_ate_logit <- c(transported_ate_logit, mean(target1$YdoX_l-target$Y_l
 }
 ```
 
-# Checking out sample ATE and transported ATE (Table 2)
+# Checking out the Sample ATE and the Transported ATE Point Estimnates and 95% CIs (Table 2)
 
 ```{r}
 mean(sample_ate_logit)
