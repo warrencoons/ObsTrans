@@ -87,20 +87,21 @@ Study Inspiration:
 
 ```{r}
 # Exposure
-lead <- read_xpt("PB12.XPT")
+
+lead <- read_xpt("../Data/Source/PB12.XPT")
 
 # Outcome (to be converted to hypertension)
-BP <- read_xpt("BP12.XPT")
+BP <- read_xpt("../Data/Source/BP12.XPT")
 
 # Confounders
-demo <- read_xpt("DEMO12.XPT")
-BMI <- read_xpt("BMI12.XPT")
-smoke <- read_xpt("SMOKE12.XPT")
-ALC <- read_xpt("ALQ12.XPT")
+demo <- read_xpt("../Data/Source/DEMO12.XPT")
+BMI <- read_xpt("../Data/Source/BMI12.XPT")
+smoke <- read_xpt("../Data/Source/SMOKE12.XPT")
+ALC <- read_xpt("../Data/Source/ALQ12.XPT")
 
 # Possible EMM
-stress <- read_xpt("STRESS12.XPT")
-sleep <- read_xpt("SLEEP12.XPT")
+stress <- read_xpt("../Data/Source/STRESS12.XPT")
+sleep <- read_xpt("../Data/Source/SLEEP12.XPT")
 ```
 
 # NHANES Setup - Merging Data
@@ -121,8 +122,6 @@ df <- lead %>%
 ```{r}
 nhanes <- df %>%  
   transform(hyper = ifelse(((BPXSY1 >= 130) | (BPXDI1 >= 80)), 1, 0)) #Find a source for the definition of hypertension (n = 8956)
-
-nrow(nhanes)
 ```
 
 Note: Definition of hypertension (according to AHA): https://www.heart.org/en/health-topics/high-blood-pressure/the-facts-about-high-blood-pressure
@@ -143,7 +142,7 @@ nhanes <- nhanes %>%
   filter(complete.cases(.)) %>%
   filter(RIDAGEYR >= 20)
 
-nhanes
+# nhanes
 ```
 
 Note: Sleep duration is capped out at 12 hours a day (anything above 12 was recorded as 12)
@@ -176,7 +175,7 @@ nhanes <- nhanes %>%
 nhanes <- nhanes %>% 
   filter(SLD010H != 77, SLD010H != 99) # (2)
 
-nhanes # (n = 1326)
+# nhanes (n = 2823)
 ```
 
 ## NHANES Setup - Smoking Data Transformations
@@ -277,24 +276,7 @@ List of possible EMM on the RD scale also found in NHANES:
 # BRFSS Setup - Importing Data
 
 ```{r}
-brfss_original <- read_xpt("BRFSS.XPT")
-# brfss
-
-brfss_original
-```
-
-# BRFSS Setup - Defining BRFSS
-
-```{r}
-brfss_var <- c("_AGE80", "_BMI5", "ALCDAY4", "SEXVAR", "EDUCA", "_SMOKER3", "MENTHLTH", "SLEPTIM1")
-
-brfss <- brfss_original %>%   
-  subset(select = all_of(brfss_var)) %>% 
-  rename(AGE80 = "_AGE80") %>% 
-  rename(BMI = "_BMI5") %>% 
-  rename(SMOKER = "_SMOKER3") 
-
-# brfss
+brfss <- read_xpt("../Data/Derived/BRFSS_derived.xpt")
 ```
 
 # BRFSS Setup - Applying Exclusion Criteria and Filtering out NA Values
@@ -303,8 +285,6 @@ brfss <- brfss_original %>%
 brfss <- brfss %>% 
   filter(complete.cases("AGE80", "MENTHLTH", "SLEPTIM1")) %>% # (0)
   filter(AGE80 >= 20) # (6924)
-
-brfss
 ```
 
 Note: Age had been imputed.
@@ -437,20 +417,20 @@ ks.test(nhanes$HSQ480, brfss$MENTHLTH)
 ks.test(nhanes$SLD010H, brfss$SLEPTIM1)
 ```
 
-The Kolmogorov-Smirnov test indicates there are different distributions in days stressed per month but not sleep duration.
+The Kolmogorov-Smirnov test indicates beyond resasonable doubt there are different distributions in days stressed per month but not sleep duration.
 
 ## Transportability
 
-# Choice of vz
+# Choice of V
 
 In theory:
 
 C = All confounders listed earlier
 Differing variables = {stress}
 EMM = {sleep}
-vz = {} (empty set)
+V = {} (empty set)
 
-However, for the purposes of illustration, we should still consider sleep as a differing variable and stress as an EMM. So we let vz = {stress, sleep}.
+However, for the purposes of illustration, we should still consider sleep as a differing variable and stress as an EMM. So we let V = {stress, sleep}.
 
 # Prepping Study Population Dataframe
 
@@ -471,7 +451,7 @@ study <- nhanes %>%
   mutate(xv1 = x*v1) %>% 
   mutate(xv2 = x*v2)
 
-study
+# study
 ```
 
 # Prepping Target Population Dataframe
@@ -482,7 +462,7 @@ target <- brfss %>%
   rename(v2 = SLEPTIM1) %>% 
   select(-c(AGE80))
             
-target
+# target
 ```
 
 # Simulating Data (Study and Target Pop.)
@@ -492,6 +472,8 @@ sample_ate_logit <- c()
 transported_ate_logit <- c()
 
 N = nrow(target)
+
+set.seed(12345)
 
 for (i in 1:1000) {
 
